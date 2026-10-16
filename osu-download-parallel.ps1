@@ -27,11 +27,16 @@ if (-not (Test-Path $idFile)) {
 	exit 1;
 }
 
+Write-Host '';
+$startMessage = '  Starting up - reading beatmapsets.txt and checking which maps you already have...';
+Write-Host $startMessage -ForegroundColor DarkGray;
+
 New-Item -ItemType Directory -Force $maps | Out-Null;
-$ids = @(Get-Content $idFile | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^\d+$' } | Select-Object -Unique | Where-Object { -not (Test-Path (Join-Path $maps "$_.osz")) });
+$have = [System.Collections.Generic.HashSet[string]]::new([string[]]@(Get-ChildItem $maps -Filter '*.osz' -File | ForEach-Object { $_.BaseName }));
+$seen = [System.Collections.Generic.HashSet[string]]::new();
+$ids = @(Get-Content $idFile | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^\d+$' -and $seen.Add($_) -and -not $have.Contains($_) });
 $total = $ids.Count;
 
-"$total maps left to download, $threads threads, capped at $maxPerMin per minute";
 
 $worker = {
 	param($id, $maps, $offset, $minSeconds, $fast, $fallback, $cooldowns);
@@ -148,52 +153,134 @@ $failed = [System.Collections.Generic.List[string]]::new();
 $done = 0;
 $start = Get-Date;
 
-function Get-StatsLine {
-	$perMin = if ($done -gt 0) {
-		$done / ((Get-Date) - $start).TotalMinutes;
+$phase = 'preparing';
+
+function Format-Span {
+	param($span);
+
+	if ($null -eq $span) {
+		return '?';
+	}
+
+	"{0}h{1:mm}m" -f [int][Math]::Floor($span.TotalHours), $span;
+}
+
+function Get-DashboardLines {
+	$now = Get-Date;
+	$elapsed = $now - $start;
+	$perMin = if ($elapsed.TotalMinutes -gt 0) {
+		$done / $elapsed.TotalMinutes;
 	}
 	else {
 		0;
 	}
 
-	$etaText = if ($perMin -gt 0) {
-		$eta = [TimeSpan]::FromMinutes(($total - $done) / $perMin);
-		"{0}h{1:mm}" -f [int][math]::Floor($eta.TotalHours), $eta;
+	$eta = if ($perMin -gt 0) {
+		[TimeSpan]::FromMinutes(($total - $done) / $perMin);
 	}
 	else {
-		'?';
+		$null;
 	}
 
-	$parts = foreach ($name in $mirrorNames) {
-		"{0} {1} ({2:N1} GB)" -f $name, [int]$okBy[$name], ([double]$bytesBy[$name] / 1GB);
+	$ratio = if ($total -gt 0) {
+		$done / $total;
+	}
+	else {
+		1;
 	}
 
-	$line = "[{0:HH:mm:ss}] {1}/{2} | {3:N0}/min | ETA {4} | {5} | failed {6}" -f (Get-Date), $done, $total, $perMin, $etaText, ($parts -join ' | '), $failed.Count;
-	$cooling = @(foreach ($name in $mirrorNames) {
-		$until = $cooldowns[$name];
+	$filled = [int][Math]::Floor($ratio * 30);
+	$bar = $c.Pink + ([string]$g.Fill * $filled) + $c.Dim + ([string]$g.Empty * (30 - $filled)) + $c.Reset;
+	$phaseText = switch -Wildcard ($phase) {
+		'running' { $c.Green + $g.Dot + ' running' + $c.Reset }
+		'preparing*' { $c.Cyan + $g.Dot + ' ' + $phase + $c.Reset }
+		'finished' { $c.Green + $g.Check + ' finished' + $c.Reset }
+		default { $c.Yellow + $g.Dot + ' ' + $phase + $c.Reset }
+	}
 
-		if ($until -and $until -gt (Get-Date)) {
-			"{0} {1:N0}s" -f $name, ($until - (Get-Date)).TotalSeconds;
+	'';
+	"  {0}{1}osu!{2}{0}{6} beatmap recovery{2}   {3}{4:HH:mm:ss}{2}   {5}" -f $c.Bold, $c.Pink, $c.Reset, $c.Dim, $now, $phaseText, $c.Orange;
+	'  ' + $c.Dim + ([string]$g.Rule * 76) + $c.Reset;
+	"  {0}Progress{1}  {2}{3,7}{1} / {4,-7} {2}{5,7:P1}{1}   {6}" -f $c.Dim, $c.Reset, $c.Bold, $done, $total, $ratio, $bar;
+	"  {0}Speed{1}     {2}{3,7:N0}{1} /min      {0}ETA{1} {4,-9} {0}elapsed{1} {5,-9} {0}limit{1} {6}/min" -f $c.Dim, $c.Reset, $c.Bold, $perMin, (Format-Span $eta), (Format-Span $elapsed), $maxPerMin;
+	'';
+	"  {0}{1,-9} {2,7} {3,10}   {4,-28} {5}{6}" -f $c.Dim, 'Mirror', 'Maps', 'Size', 'Errors', 'Status', $c.Reset;
+
+	foreach ($name in $mirrorNames) {
+		$errs = @($errBy.GetEnumerator() | Where-Object { $_.Name -like "${name}:*" } | Sort-Object Name | ForEach-Object {
+			"{0} x{1}" -f $_.Name.Split(':')[1], $_.Value;
+		});
+
+		$errText = if ($errs.Count -gt 0) {
+			$errs -join ', ';
 		}
-	});
+		else {
+			'-';
+		}
 
-	if ($cooling.Count -gt 0) {
-		$line += " | cooldown: " + ($cooling -join ', ');
+		if ($errText.Length -gt 28) {
+			$errText = $errText.Substring(0, 25) + '...';
+		}
+
+		$errColor = if ($errs.Count -gt 0) {
+			$c.Yellow;
+		}
+		else {
+			$c.Dim;
+		}
+
+		$until = $cooldowns[$name];
+		$status = if ($until -and $until -gt $now) {
+			"{0}{1} cooldown {2:N0}s{3}" -f $c.Yellow, $g.Dot, ($until - $now).TotalSeconds, $c.Reset;
+		}
+		else {
+			"{0}{1} ok{2}" -f $c.Green, $g.Dot, $c.Reset;
+		}
+
+		"  {0}{1,-9}{2} {3,7} {4,7:N1} GB   {5}{6,-28}{2} {7}" -f $c.Bold, $name, $c.Reset, [int]$okBy[$name], ([double]$bytesBy[$name] / 1GB), $errColor, $errText, $status;
 	}
 
-	$line;
+	$failColor = if ($failed.Count -gt 0) {
+		$c.Red;
+	}
+	else {
+		$c.Green;
+	}
+
+	'';
+	"  {0}Failed{1}    {2}{3,7}{1}      {0}Skipped{1} {4,-7}  {0}Crashed{1} {5}" -f $c.Dim, $c.Reset, $failColor, $failed.Count, [int]$okBy['existing'], [int]$errBy['worker:crash'];
+	'  ' + $c.Dim + 'Ctrl+C stops safely - finished maps are kept and the next run continues' + $c.Reset;
 }
 
-function Get-ErrorLine {
-	if ($errBy.Count -eq 0) {
-		return $null;
+function Show-Dashboard {
+	$lines = @(Get-DashboardLines);
+
+	if (-not $interactive) {
+		$lines | ForEach-Object { Write-Host $_ };
+		return;
 	}
 
-	$items = $errBy.GetEnumerator() | Sort-Object Name | ForEach-Object {
-		"{0} x{1}" -f ($_.Name -replace ':', ' '), $_.Value;
+	[Console]::SetCursorPosition(0, $dashTop);
+
+	if ($useColor) {
+		foreach ($line in $lines) {
+			[Console]::Write($line + $c.Reset + $c.ClearLine + "`n");
+		}
+
+		return;
 	}
 
-	"           errors: " + ($items -join ' | ');
+	$width = [Math]::Max(40, [Console]::WindowWidth - 1);
+	foreach ($line in $lines) {
+		$text = if ($line.Length -gt $width) {
+			$line.Substring(0, $width);
+		}
+		else {
+			$line.PadRight($width);
+		}
+
+		[Console]::WriteLine($text);
+	}
 }
 
 $logPath = Join-Path $out 'download-log.csv';
@@ -210,8 +297,76 @@ $pool = [runspacefactory]::CreateRunspacePool(1, $threads);
 $pool.Open();
 $jobs = [System.Collections.Generic.List[object]]::new();
 $n = 0;
+$interactive = -not [Console]::IsOutputRedirected;
+$useColor = $interactive -and $Host.UI.SupportsVirtualTerminal -and -not $env:NO_COLOR;
+$dashTop = 0;
+$startLines = 0;
+$oldEncoding = [Console]::OutputEncoding;
+$esc = [char]27;
+$c = @{};
+$g = @{
+	Fill = '#';
+	Empty = '.';
+	Rule = '-';
+	Dot = '*';
+	Check = '*';
+}
+
+foreach ($key in 'Reset', 'Bold', 'Dim', 'Pink', 'Orange', 'Cyan', 'Green', 'Yellow', 'Red', 'ClearLine') {
+	$c[$key] = '';
+}
+
+if ($useColor) {
+	$c = @{
+		Reset = "$esc[0m";
+		Bold = "$esc[1m";
+		Dim = "$esc[90m";
+		Pink = "$esc[38;2;255;102;170m";
+		Orange = "$esc[38;2;255;153;51m";
+		Cyan = "$esc[36m";
+		Green = "$esc[92m";
+		Yellow = "$esc[33m";
+		Red = "$esc[31m";
+		ClearLine = "$esc[K";
+	}
+
+	$g = @{
+		Fill = [char]0x2501;
+		Empty = [char]0x2500;
+		Rule = [char]0x2500;
+		Dot = [char]0x25CF;
+		Check = [char]0x2714;
+	}
+
+	try {
+		[Console]::OutputEncoding = [Text.Encoding]::UTF8;
+	} catch {
+	}
+}
+
+if ($interactive) {
+	try {
+		$lineCount = @(Get-DashboardLines).Count;
+		$startLines = 1 + [Math]::Ceiling($startMessage.Length / [Math]::Max(1, [Console]::BufferWidth));
+		[Console]::Write("`n" * $lineCount);
+		$dashTop = [Math]::Max(0, [Console]::CursorTop - $lineCount);
+		[Console]::CursorVisible = $false;
+	} catch {
+		$interactive = $false;
+	}
+}
+
+$refreshSeconds = if ($interactive) {
+	1;
+}
+else {
+	30;
+}
 
 try {
+	Show-Dashboard;
+	$lastQueueDraw = Get-Date;
+
 	foreach ($id in $ids) {
 		$ps = [powershell]::Create().AddScript($worker).AddArgument($id).AddArgument($maps).AddArgument($n % $fast.Count).AddArgument($minSeconds).AddArgument($fast).AddArgument($fallback).AddArgument($cooldowns);
 		$ps.RunspacePool = $pool;
@@ -221,9 +376,24 @@ try {
 		});
 
 		$n++;
+
+		if (((Get-Date) - $lastQueueDraw).TotalMilliseconds -ge 500) {
+			$phase = "preparing $n/$total";
+			Show-Dashboard;
+			$lastQueueDraw = Get-Date;
+		}
 	}
 
-	$lastReport = Get-Date;
+	$phase = 'running';
+	$start = Get-Date;
+
+	if ($interactive -and $startLines -gt 0) {
+		$dashTop = [Math]::Max(0, $dashTop - $startLines);
+		Show-Dashboard;
+		[Console]::Write(((' ' * [Math]::Max(1, [Console]::BufferWidth - 1)) + "`n") * $startLines);
+	}
+
+	$lastReport = [datetime]::MinValue;
 	while ($jobs.Count -gt 0) {
 		foreach ($j in @($jobs | Where-Object { $_.Handle.IsCompleted })) {
 			$r = $j.Ps.EndInvoke($j.Handle) | Select-Object -Last 1;
@@ -252,14 +422,8 @@ try {
 			$log.WriteLine(("{0:s},{1},{2},{3},{4}" -f (Get-Date), $r.Id, $r.Mirror, $r.Bytes, ($r.Errors -join ' ')));
 		}
 
-		if (((Get-Date) - $lastReport).TotalSeconds -ge 10 -and $done -gt 0) {
-			Write-Host (Get-StatsLine);
-			$el = Get-ErrorLine;
-
-			if ($el) {
-				Write-Host $el -ForegroundColor Yellow;
-			}
-
+		if (((Get-Date) - $lastReport).TotalSeconds -ge $refreshSeconds) {
+			Show-Dashboard;
 			$lastReport = Get-Date;
 		}
 
@@ -267,6 +431,11 @@ try {
 	}
 }
 finally {
+	if ($done -lt $total) {
+		$phase = 'stopping...';
+		Show-Dashboard;
+	}
+
 	foreach ($j in $jobs) {
 		if (-not $j.Handle.IsCompleted) {
 			[void]$j.Ps.BeginStop($null, $null);
@@ -282,22 +451,25 @@ finally {
 	[void]$pool.BeginClose($null, $null);
 	$log.Dispose();
 
-	$failed | Set-Content (Join-Path $out 'failed.txt');
+	Set-Content (Join-Path $out 'failed.txt') -Value @($failed);
 
-	Write-Host '';
-	Write-Host '===== SUMMARY =====' -ForegroundColor Cyan;
-	Write-Host (Get-StatsLine);
+	$phase = if ($done -ge $total) {
+		'finished';
+	}
+	else {
+		'stopped';
+	}
 
-	foreach ($name in $mirrorNames + 'existing') {
-		if ($okBy[$name]) {
-			Write-Host ("  {0,-9} {1,6} maps  {2,8:N2} GB" -f $name, $okBy[$name], ([double]$bytesBy[$name] / 1GB));
+	Show-Dashboard;
+
+	if ($interactive) {
+		try {
+			[Console]::CursorVisible = $true;
+			[Console]::OutputEncoding = $oldEncoding;
+		} catch {
 		}
 	}
 
-	$el = Get-ErrorLine;
-	if ($el) {
-		Write-Host $el.Trim() -ForegroundColor Yellow;
-	}
-
-	Write-Host "  failed: $($failed.Count) (see failed.txt), full log: download-log.csv";
+	Write-Host '';
+	Write-Host ("  {0}Failed IDs are in failed.txt, every download is in download-log.csv{1}" -f $c.Dim, $c.Reset);
 }
