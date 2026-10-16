@@ -200,8 +200,10 @@ function Get-DashboardLines {
 		1;
 	}
 
-	$filled = [int][Math]::Floor($ratio * 30);
-	$bar = $c.Pink + ([string]$g.Fill * $filled) + $c.Dim + ([string]$g.Empty * (30 - $filled)) + $c.Reset;
+	$halves = [int][Math]::Floor($ratio * 152);
+	$filled = [int][Math]::Floor($halves / 2);
+	$half = $halves % 2;
+	$bar = $c.Pink + ([string]$g.Fill * $filled) + ([string]$g.Half * $half) + $c.Dim + ([string]$g.Empty * (76 - $filled - $half)) + $c.Reset;
 	$phaseText = switch -Wildcard ($phase) {
 		'running' { $c.Green + $g.Dot + ' running' + $c.Reset }
 		'preparing*' { $c.Cyan + $g.Dot + ' ' + $phase + $c.Reset }
@@ -212,7 +214,8 @@ function Get-DashboardLines {
 	'';
 	"  {0}{1}osu!{2}{0}{6} beatmap recovery{2}   {3}{4:HH:mm:ss}{2}   {5}" -f $c.Bold, $c.Pink, $c.Reset, $c.Dim, $now, $phaseText, $c.Orange;
 	'  ' + $c.Dim + ([string]$g.Rule * 76) + $c.Reset;
-	"  {0}Progress{1}  {2}{3,7}{1} / {4,-7} {2}{5,7:P1}{1}   {6}" -f $c.Dim, $c.Reset, $c.Bold, $done, $total, $ratio, $bar;
+	"  {0}Progress{1}  {2}{3,7}{1} / {4,-7} {2}{5,7:P1}{1}" -f $c.Dim, $c.Reset, $c.Bold, $done, $total, $ratio;
+	'  ' + $bar;
 	"  {0}Speed{1}     {2}{3,7:N0}{1} /min      {0}ETA{1} {4,-9} {0}elapsed{1} {5,-9} {0}limit{1} {6}/min" -f $c.Dim, $c.Reset, $c.Bold, $perMin, (Format-Span $eta), (Format-Span $elapsed), $maxPerMin;
 	'';
 	"  {0}{1,-9} {2,7} {3,10} {4,6}   {5,-22} {6}{7}" -f $c.Dim, 'Mirror', 'Maps', 'Size', 'Avg', 'Errors', 'Status', $c.Reset;
@@ -325,6 +328,7 @@ $esc = [char]27;
 $c = @{};
 $g = @{
 	Fill = '#';
+	Half = '#';
 	Empty = '.';
 	Rule = '-';
 	Dot = '*';
@@ -351,6 +355,7 @@ if ($useColor) {
 
 	$g = @{
 		Fill = [char]0x2501;
+		Half = [char]0x257E;
 		Empty = [char]0x2500;
 		Rule = [char]0x2500;
 		Dot = [char]0x25CF;
