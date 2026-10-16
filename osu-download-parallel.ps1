@@ -3,6 +3,7 @@ $maps = Join-Path $out 'maps';
 $idFile = Join-Path $out 'beatmapsets.txt';
 $threads = 10;
 $maxPerMin = 110;
+$userAgent = 'osu-lazer-beatmap-recovery/1.0 (+https://github.com/LadderGeit/osu-lazer-beatmap-recovery)';
 
 $fast = @(
 	@{
@@ -39,7 +40,7 @@ $total = $ids.Count;
 
 
 $worker = {
-	param($id, $maps, $offset, $minSeconds, $fast, $fallback, $cooldowns);
+	param($id, $maps, $offset, $minSeconds, $fast, $fallback, $cooldowns, $userAgent);
 	$started = Get-Date;
 	$ProgressPreference = 'SilentlyContinue';
 
@@ -78,7 +79,7 @@ $worker = {
 		}
 
 		try {
-			Invoke-WebRequest ($m.Url -f $id) -OutFile "$dest.part" -UseBasicParsing -TimeoutSec 180;
+			Invoke-WebRequest ($m.Url -f $id) -OutFile "$dest.part" -UserAgent $userAgent -UseBasicParsing -TimeoutSec 180;
 
 			$fs = [IO.File]::OpenRead("$dest.part");
 			$b0 = $fs.ReadByte();
@@ -369,7 +370,7 @@ try {
 	$lastQueueDraw = Get-Date;
 
 	foreach ($id in $ids) {
-		$ps = [powershell]::Create().AddScript($worker).AddArgument($id).AddArgument($maps).AddArgument($n % $fast.Count).AddArgument($minSeconds).AddArgument($fast).AddArgument($fallback).AddArgument($cooldowns);
+		$ps = [powershell]::Create().AddScript($worker).AddArgument($id).AddArgument($maps).AddArgument($n % $fast.Count).AddArgument($minSeconds).AddArgument($fast).AddArgument($fallback).AddArgument($cooldowns).AddArgument($userAgent);
 		$ps.RunspacePool = $pool;
 		$jobs.Add([pscustomobject]@{
 			Ps = $ps;
