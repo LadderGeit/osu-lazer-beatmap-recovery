@@ -1,0 +1,11 @@
+# One beatmapset ID per line. Lines that aren't a number (like this one) are ignored.
+# Rename this file to beatmapsets.txt, or replace it with your own list.
+126
+688
+917
+1890
+4422
+8993
+15066
+20111
+39804

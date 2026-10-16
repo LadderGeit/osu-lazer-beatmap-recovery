@@ -1,0 +1,6 @@
+maps/
+*.osz
+*.part
+beatmapsets.txt
+failed.txt
+download-log.csv
