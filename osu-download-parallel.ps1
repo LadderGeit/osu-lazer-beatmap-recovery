@@ -372,7 +372,7 @@ if ($useColor) {
 		Empty = [char]0x2500;
 		Rule = [char]0x2500;
 		Dot = [char]0x25CF;
-		Check = [char]0x2714;
+		Check = [char]0x2713;
 	}
 
 	try {
