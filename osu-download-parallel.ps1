@@ -2,7 +2,7 @@ $out = $PSScriptRoot;
 $maps = Join-Path $out 'maps';
 $idFile = Join-Path $out 'beatmapsets.txt';
 $threads = 16;
-$maxPerMin = 110;
+$maxPerMin = 120;
 $userAgent = 'osu-lazer-beatmap-recovery/1.0 (+https://github.com/LadderGeit/osu-lazer-beatmap-recovery)';
 
 $fast = @(

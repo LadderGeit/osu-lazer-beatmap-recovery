@@ -4,6 +4,8 @@ Re-downloads a list of osu! beatmapsets from public mirrors, in parallel, at a f
 
 I wrote this after rebuilding my PC and losing osu!lazer's database (`client.realm`). All of the map files were still on disk in lazer's `files` folder, but without the database lazer no longer knew what any of them were. Every `.osu` file still contains its `BeatmapSetID`, so the library can be rebuilt by collecting those IDs and downloading the sets again. This script does the downloading part.
 
+![The live dashboard while downloading](docs/dashboard.png)
+
 ## Contents
 
 - [What it does](#what-it-does)
@@ -21,7 +23,7 @@ I wrote this after rebuilding my PC and losing osu!lazer's database (`client.rea
 - Downloads each set into `maps\<id>.osz`, without videos
 - Skips sets that are already downloaded, so you can stop and restart at any time
 - Spreads the work over two mirrors and falls back to a third when neither has a set
-- Keeps to a fixed overall rate of 110 maps a minute, no matter how many downloads are running
+- Keeps to a fixed overall rate of 120 maps a minute, no matter how many downloads are running
 - Backs off from a mirror that answers `429`/`503`, using its `Retry-After` header when it sends one
 - Checks every download is a real `.osz` before keeping it
 - Shows a live dashboard with progress, speed, ETA and per-mirror stats
