@@ -29,6 +29,12 @@ I wrote this after rebuilding my PC and losing osu!lazer's database (`client.rea
    pwsh -File .\osu-download-parallel.ps1
    ```
 
+If PowerShell refuses with *"is not digitally signed"*, that's because Windows marks files downloaded from the internet. Unblock the script once and run it again:
+
+```powershell
+Unblock-File .\osu-download-parallel.ps1
+```
+
 Stop it with Ctrl+C whenever you like. It prints a summary, and the next run continues where it left off. Sets that every mirror failed on end up in `failed.txt`; run the script again later to retry them.
 
 ## Getting the IDs from a broken lazer install
