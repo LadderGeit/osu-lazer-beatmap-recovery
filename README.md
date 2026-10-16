@@ -10,9 +10,9 @@ I wrote this after rebuilding my PC and losing osu!lazer's database (`client.rea
 
 - [What it does](#what-it-does)
 - [Requirements](#requirements)
-- [1. Get your beatmapset IDs](#1-get-your-beatmapset-ids)
-- [2. Download the maps](#2-download-the-maps)
-- [3. Import them into lazer](#3-import-them-into-lazer)
+	1. [Get your beatmapset IDs](#1-get-your-beatmapset-ids)
+	2. [Download the maps](#2-download-the-maps)
+	3. [Import them into lazer](#3-import-them-into-lazer)
 - [Files it creates](#files-it-creates)
 - [Mirrors](#mirrors)
 - [Copyright](#copyright)
@@ -66,9 +66,9 @@ Very old maps don't have a `BeatmapSetID` line. Those can't be found this way.
 1. Put `osu-download-parallel.ps1` and your `beatmapsets.txt` together in a folder.
 2. Open PowerShell 7 in that folder and run:
 
-   ```powershell
-   pwsh -File .\osu-download-parallel.ps1
-   ```
+```powershell
+pwsh -File .\osu-download-parallel.ps1
+```
 
 If PowerShell refuses with *"is not digitally signed"*, that's because Windows marks files downloaded from the internet. Unblock the script once and run it again:
 
