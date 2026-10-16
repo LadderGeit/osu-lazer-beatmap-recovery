@@ -1,7 +1,7 @@
 $out = $PSScriptRoot;
 $maps = Join-Path $out 'maps';
 $idFile = Join-Path $out 'beatmapsets.txt';
-$threads = 10;
+$threads = 16;
 $maxPerMin = 110;
 $userAgent = 'osu-lazer-beatmap-recovery/1.0 (+https://github.com/LadderGeit/osu-lazer-beatmap-recovery)';
 
@@ -40,8 +40,7 @@ $total = $ids.Count;
 
 
 $worker = {
-	param($id, $maps, $offset, $minSeconds, $fast, $fallback, $cooldowns, $userAgent);
-	$started = Get-Date;
+	param($id, $maps, $offset, $gapSeconds, $fast, $fallback, $cooldowns, $userAgent);
 	$ProgressPreference = 'SilentlyContinue';
 
 	[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12;
@@ -50,6 +49,7 @@ $worker = {
 		Id = $id;
 		Mirror = $null;
 		Bytes = 0;
+		Seconds = 0;
 		Errors = @();
 	}
 
@@ -72,6 +72,19 @@ $worker = {
 		Start-Sleep -Seconds ([Math]::Max(1, [Math]::Ceiling(($next - $now).TotalSeconds)));
 	}
 
+	[System.Threading.Monitor]::Enter($cooldowns.SyncRoot);
+	try {
+		$slot = [Math]::Max((Get-Date).Ticks, [long]$cooldowns['#next']);
+		$cooldowns['#next'] = $slot + [long]($gapSeconds * 10000000);
+	} finally {
+		[System.Threading.Monitor]::Exit($cooldowns.SyncRoot);
+	}
+
+	$wait = ($slot - (Get-Date).Ticks) / 10000;
+	if ($wait -gt 0) {
+		Start-Sleep -Milliseconds ([int]$wait);
+	}
+
 	$errors = @();
 	foreach ($m in $order) {
 		if ($cooldowns[$m.Name] -and $cooldowns[$m.Name] -gt (Get-Date)) {
@@ -79,6 +92,7 @@ $worker = {
 		}
 
 		try {
+			$sw = [Diagnostics.Stopwatch]::StartNew();
 			Invoke-WebRequest ($m.Url -f $id) -OutFile "$dest.part" -UserAgent $userAgent -UseBasicParsing -TimeoutSec 180;
 
 			$fs = [IO.File]::OpenRead("$dest.part");
@@ -91,6 +105,7 @@ $worker = {
 				Move-Item "$dest.part" $dest -Force;
 				$res.Mirror = $m.Name;
 				$res.Bytes = $len;
+				$res.Seconds = [Math]::Round($sw.Elapsed.TotalSeconds, 1);
 				$cooldowns["$($m.Name)#strikes"] = 0;
 				break;
 			}
@@ -138,18 +153,13 @@ $worker = {
 	}
 
 	$res.Errors = $errors;
-
-	$elapsed = ((Get-Date) - $started).TotalSeconds;
-	if ($elapsed -lt $minSeconds) {
-		Start-Sleep -Milliseconds ([int](($minSeconds - $elapsed) * 1000));
-	}
-
 	$res;
 }
 
 $okBy = @{};
 $bytesBy = @{};
 $errBy = @{};
+$durBy = @{};
 $failed = [System.Collections.Generic.List[string]]::new();
 $done = 0;
 $start = Get-Date;
@@ -205,7 +215,7 @@ function Get-DashboardLines {
 	"  {0}Progress{1}  {2}{3,7}{1} / {4,-7} {2}{5,7:P1}{1}   {6}" -f $c.Dim, $c.Reset, $c.Bold, $done, $total, $ratio, $bar;
 	"  {0}Speed{1}     {2}{3,7:N0}{1} /min      {0}ETA{1} {4,-9} {0}elapsed{1} {5,-9} {0}limit{1} {6}/min" -f $c.Dim, $c.Reset, $c.Bold, $perMin, (Format-Span $eta), (Format-Span $elapsed), $maxPerMin;
 	'';
-	"  {0}{1,-9} {2,7} {3,10}   {4,-28} {5}{6}" -f $c.Dim, 'Mirror', 'Maps', 'Size', 'Errors', 'Status', $c.Reset;
+	"  {0}{1,-9} {2,7} {3,10} {4,6}   {5,-22} {6}{7}" -f $c.Dim, 'Mirror', 'Maps', 'Size', 'Avg', 'Errors', 'Status', $c.Reset;
 
 	foreach ($name in $mirrorNames) {
 		$errs = @($errBy.GetEnumerator() | Where-Object { $_.Name -like "${name}:*" } | Sort-Object Name | ForEach-Object {
@@ -219,8 +229,15 @@ function Get-DashboardLines {
 			'-';
 		}
 
-		if ($errText.Length -gt 28) {
-			$errText = $errText.Substring(0, 25) + '...';
+		if ($errText.Length -gt 22) {
+			$errText = $errText.Substring(0, 19) + '...';
+		}
+
+		$avgText = if ($durBy[$name] -and $durBy[$name].Count -gt 0) {
+			"{0:N1}s" -f ($durBy[$name] | Measure-Object -Average).Average;
+		}
+		else {
+			'-';
 		}
 
 		$errColor = if ($errs.Count -gt 0) {
@@ -238,7 +255,7 @@ function Get-DashboardLines {
 			"{0}{1} ok{2}" -f $c.Green, $g.Dot, $c.Reset;
 		}
 
-		"  {0}{1,-9}{2} {3,7} {4,7:N1} GB   {5}{6,-28}{2} {7}" -f $c.Bold, $name, $c.Reset, [int]$okBy[$name], ([double]$bytesBy[$name] / 1GB), $errColor, $errText, $status;
+		"  {0}{1,-9}{2} {3,7} {4,7:N1} GB {8,6}   {5}{6,-22}{2} {7}" -f $c.Bold, $name, $c.Reset, [int]$okBy[$name], ([double]$bytesBy[$name] / 1GB), $errColor, $errText, $status, $avgText;
 	}
 
 	$failColor = if ($failed.Count -gt 0) {
@@ -291,10 +308,10 @@ $log = [IO.StreamWriter]::new($logPath, $true);
 $log.AutoFlush = $true;
 
 if ($newLog) {
-	$log.WriteLine('time,id,mirror,bytes,errors');
+	$log.WriteLine('time,id,mirror,bytes,errors,seconds');
 }
 
-$minSeconds = $threads * 60 / $maxPerMin;
+$gapSeconds = 60 / $maxPerMin;
 $pool = [runspacefactory]::CreateRunspacePool(1, $threads);
 $pool.Open();
 $jobs = [System.Collections.Generic.List[object]]::new();
@@ -370,7 +387,7 @@ try {
 	$lastQueueDraw = Get-Date;
 
 	foreach ($id in $ids) {
-		$ps = [powershell]::Create().AddScript($worker).AddArgument($id).AddArgument($maps).AddArgument($n % $fast.Count).AddArgument($minSeconds).AddArgument($fast).AddArgument($fallback).AddArgument($cooldowns).AddArgument($userAgent);
+		$ps = [powershell]::Create().AddScript($worker).AddArgument($id).AddArgument($maps).AddArgument($n % $fast.Count).AddArgument($gapSeconds).AddArgument($fast).AddArgument($fallback).AddArgument($cooldowns).AddArgument($userAgent);
 		$ps.RunspacePool = $pool;
 		$jobs.Add([pscustomobject]@{
 			Ps = $ps;
@@ -412,6 +429,17 @@ try {
 			if ($r.Mirror) {
 				$okBy[$r.Mirror] = 1 + [int]$okBy[$r.Mirror];
 				$bytesBy[$r.Mirror] = [double]$bytesBy[$r.Mirror] + $r.Bytes;
+
+				if ($r.Mirror -ne 'existing') {
+					if (-not $durBy[$r.Mirror]) {
+						$durBy[$r.Mirror] = [System.Collections.Generic.Queue[double]]::new();
+					}
+
+					$durBy[$r.Mirror].Enqueue($r.Seconds);
+					if ($durBy[$r.Mirror].Count -gt 50) {
+						[void]$durBy[$r.Mirror].Dequeue();
+					}
+				}
 			}
 			else {
 				$failed.Add($r.Id);
@@ -421,7 +449,7 @@ try {
 				$errBy[$e] = 1 + [int]$errBy[$e];
 			}
 
-			$log.WriteLine(("{0:s},{1},{2},{3},{4}" -f (Get-Date), $r.Id, $r.Mirror, $r.Bytes, ($r.Errors -join ' ')));
+			$log.WriteLine(("{0:s},{1},{2},{3},{4},{5}" -f (Get-Date), $r.Id, $r.Mirror, $r.Bytes, ($r.Errors -join ' '), $r.Seconds.ToString([cultureinfo]::InvariantCulture)));
 		}
 
 		if (((Get-Date) - $lastReport).TotalSeconds -ge $refreshSeconds) {
