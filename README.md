@@ -1,8 +1,8 @@
 # osu-lazer-beatmap-recovery
 
-Re-downloads a list of osu! beatmapsets from public mirrors, in parallel, at a fixed and polite rate.
+Re-downloads a list of osu! beatmapsets from public mirrors in parallel, at a fixed and polite rate.
 
-I wrote this after rebuilding my PC and losing osu!lazer's database (`client.realm`). All of the map files were still on disk in lazer's `files` folder, but without the database lazer no longer knew what any of them were. Every `.osu` file still contains its `BeatmapSetID`, so the library can be rebuilt by collecting those IDs and downloading the sets again. This script does the downloading part.
+I lost my osu!lazer database (`client.realm`) after rebuilding my PC. All of the map files were still on disk in lazer's `files` folder, but without the database lazer no longer knew what any of them were. Every `.osu` file still contains its `BeatmapSetID`, so the library can be rebuilt by collecting those IDs and downloading the sets again. This script does the downloading part, though there's instructions on how to get your beatmapset IDs.
 
 ![The live dashboard while downloading](docs/dashboard.png)
 
@@ -12,8 +12,8 @@ I wrote this after rebuilding my PC and losing osu!lazer's database (`client.rea
 - [Requirements](#requirements)
 	1. [Get your beatmapset IDs](#1-get-your-beatmapset-ids)
 	2. [Download the maps](#2-download-the-maps)
-	3. [Import them into lazer](#3-import-them-into-lazer)
-- [Files it creates](#files-it-creates)
+	3. [Import into lazer](#3-import-into-lazer)
+- [Files](#files)
 - [Mirrors](#mirrors)
 - [Copyright](#copyright)
 
@@ -21,7 +21,7 @@ I wrote this after rebuilding my PC and losing osu!lazer's database (`client.rea
 
 - Reads `beatmapsets.txt` (one beatmapset ID per line) from the script's folder
 - Downloads each set into `maps\<id>.osz`, without videos
-- Skips sets that are already downloaded, so you can stop and restart at any time
+- Skips sets that are already downloaded
 - Spreads the work over two mirrors and falls back to a third when neither has a set
 - Keeps to a fixed overall rate of 120 maps a minute, no matter how many downloads are running
 - Backs off from a mirror that answers `429`/`503`, using its `Retry-After` header when it sends one
@@ -61,7 +61,7 @@ $ids | Sort-Object | Set-Content beatmapsets.txt;
 
 Very old maps don't have a `BeatmapSetID` line. Those can't be found this way.
 
-## 2. Download the maps
+## 2. Download maps
 
 1. Put `osu-download-parallel.ps1` and your `beatmapsets.txt` together in a folder.
 2. Open PowerShell 7 in that folder and run:
@@ -78,13 +78,13 @@ Unblock-File .\osu-download-parallel.ps1
 
 Stop it with Ctrl+C whenever you like. Finished maps are kept and the next run continues where it left off. Sets that every mirror failed on end up in `failed.txt`; run the script again later to retry them.
 
-## 3. Import them into lazer
+## 3. Import into lazer
 
-Drag the `.osz` files onto the osu!lazer window. Lazer deletes each `.osz` after importing it, so import a copy if you want to keep the originals. Lazer stores files by hash, so sets whose files are still in your `files` folder take up hardly any extra space.
+Drag the `.osz` files onto the osu!lazer window. Lazer deletes each `.osz` after importing it, so import a copy if you want to keep the originals.
 
-## Files it creates
+## Files
 
-All next to the script:
+All the files that the script creates in it's directory:
 
 | File | What's in it |
 |---|---|
