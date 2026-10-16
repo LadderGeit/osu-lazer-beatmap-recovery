@@ -249,6 +249,7 @@ function Get-DashboardLines {
 
 	'';
 	"  {0}Failed{1}    {2}{3,7}{1}      {0}Skipped{1} {4,-7}  {0}Crashed{1} {5}" -f $c.Dim, $c.Reset, $failColor, $failed.Count, [int]$okBy['existing'], [int]$errBy['worker:crash'];
+	'  ' + $c.Dim + ([string]$g.Rule * 76) + $c.Reset;
 	'  ' + $c.Dim + 'Ctrl+C stops safely - finished maps are kept and the next run continues' + $c.Reset;
 }
 
