@@ -38,6 +38,19 @@ $seen = [System.Collections.Generic.HashSet[string]]::new();
 $ids = @(Get-Content $idFile | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^\d+$' -and $seen.Add($_) -and -not $have.Contains($_) });
 $total = $ids.Count;
 
+if ($total -eq 0) {
+	if ($seen.Count -eq 0) {
+		Write-Host '  No beatmapset IDs found in beatmapsets.txt - put one ID per line in it and run again' -ForegroundColor Red;
+		exit 1;
+	}
+
+	Set-Content (Join-Path $out 'failed.txt') -Value @();
+	Write-Host '';
+	Write-Host ("  All done - all {0:N0} maps in beatmapsets.txt are already in the maps folder." -f $seen.Count) -ForegroundColor Green;
+	Write-Host '  Import them by dragging the .osz files onto osu!lazer (it deletes each .osz after importing, so drag a copy).' -ForegroundColor DarkGray;
+	Write-Host '';
+	exit 0;
+}
 
 $worker = {
 	param($id, $maps, $offset, $gapSeconds, $fast, $fallback, $cooldowns, $userAgent);
@@ -506,5 +519,17 @@ finally {
 	}
 
 	Write-Host '';
-	Write-Host ("  {0}Failed IDs are in failed.txt, every download is in download-log.csv{1}" -f $c.Dim, $c.Reset);
+
+	if ($phase -eq 'finished' -and $failed.Count -eq 0) {
+		Write-Host ("  {0}All done - every map in beatmapsets.txt is in the maps folder.{1}" -f $c.Green, $c.Reset);
+		Write-Host ("  {0}Import them by dragging the .osz files onto osu!lazer (it deletes each .osz after importing, so drag a copy).{1}" -f $c.Dim, $c.Reset);
+	}
+	elseif ($phase -eq 'finished') {
+		Write-Host ("  {0}Finished - {1:N0} maps couldn't be downloaded. They're listed in failed.txt; run the script again later to retry them.{2}" -f $c.Yellow, $failed.Count, $c.Reset);
+	}
+	else {
+		Write-Host ("  {0}Stopped - run the script again to continue where it left off.{1}" -f $c.Dim, $c.Reset);
+	}
+
+	Write-Host ("  {0}Every download is logged in download-log.csv{1}" -f $c.Dim, $c.Reset);
 }
